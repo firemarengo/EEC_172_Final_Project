@@ -1,0 +1,77 @@
+/**
+ * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
+ * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ * @cliArgs --device "CC3200" --package "Default" --part "Default"
+ * @versions {"tool":"1.15.0+2826"}
+ */
+
+/**
+ * These are the peripherals and settings in this configuration
+ */
+const iGPIO1          = scripting.addPeripheral("GPIO");
+iGPIO1.$name          = "MyGPIO1";
+iGPIO1.GPIO00.$used   = false;
+iGPIO1.GPIO01.$used   = false;
+iGPIO1.GPIO02.$used   = false;
+iGPIO1.GPIO03.io      = "output";
+iGPIO1.GPIO03.$assign = "ball.58";
+iGPIO1.GPIO04.$used   = false;
+iGPIO1.GPIO05.$used   = false;
+iGPIO1.GPIO06.io      = "output";
+iGPIO1.GPIO06.$assign = "ball.61";
+iGPIO1.GPIO07.io      = "output";
+iGPIO1.GPIO07.$assign = "ball.62";
+iGPIO1.GPIO08.$used   = false;
+iGPIO1.GPIO09.$used   = false;
+iGPIO1.GPIO10.$used   = false;
+iGPIO1.GPIO11.$used   = false;
+iGPIO1.GPIO12.$used   = false;
+iGPIO1.GPIO13.$used   = false;
+iGPIO1.GPIO14.$used   = false;
+iGPIO1.GPIO15.$used   = false;
+iGPIO1.GPIO16.$used   = false;
+iGPIO1.GPIO17.io      = "output";
+iGPIO1.GPIO17.$assign = "ball.8";
+iGPIO1.GPIO22.$used   = false;
+iGPIO1.GPIO23.$used   = false;
+iGPIO1.GPIO24.$used   = false;
+iGPIO1.GPIO28.io      = "output";
+iGPIO1.GPIO28.$assign = "ball.18";
+iGPIO1.GPIO29.$used   = false;
+iGPIO1.GPIO25.$used   = false;
+iGPIO1.GPIO30.$used   = false;
+iGPIO1.GPIO31.$used   = false;
+iGPIO1.GPIO32.$used   = false;
+const iI2C1           = scripting.addPeripheral("I2C");
+iI2C1.$name           = "MyI2C1";
+iI2C1.SCL.$assign     = "ball.3";
+iI2C1.SDA.$assign     = "ball.4";
+const iSDHost1        = scripting.addPeripheral("SDHost");
+iSDHost1.$name        = "MySDHost1";
+iSDHost1.IRQ.$used    = false;
+const iSPI1           = scripting.addPeripheral("SPI");
+iSPI1.$name           = "MySPI1";
+iSPI1.CS.$used        = false;
+const iUART1          = scripting.addPeripheral("UART");
+iUART1.$name          = "MyUART1";
+iUART1.RTS.$used      = false;
+iUART1.CTS.$used      = false;
+
+/**
+ * Pinmux solution for unlocked pins/peripherals. This ensures that minor changes to the automatic solver in a future
+ * version of the tool will not impact the pinmux you originally saw.  These lines can be completely deleted in order to
+ * re-solve from scratch.
+ */
+iGPIO1.$suggestSolution        = "GPIO";
+iI2C1.$suggestSolution         = "I2C0";
+iSDHost1.$suggestSolution      = "SDHost0";
+iSDHost1.DATA.$suggestSolution = "ball.64";
+iSDHost1.CLK.$suggestSolution  = "ball.1";
+iSDHost1.CMD.$suggestSolution  = "ball.2";
+iSPI1.$suggestSolution         = "SPI0";
+iSPI1.CLK.$suggestSolution     = "ball.5";
+iSPI1.MISO.$suggestSolution    = "ball.6";
+iSPI1.MOSI.$suggestSolution    = "ball.7";
+iUART1.$suggestSolution        = "UART0";
+iUART1.TX.$suggestSolution     = "ball.55";
+iUART1.RX.$suggestSolution     = "ball.57";

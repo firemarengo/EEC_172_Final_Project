@@ -1,0 +1,13 @@
+*
+!*/
+
+!.gitignore
+!*.txt
+!*.syscfg
+!*.sal
+!*.pem
+!*.key
+!*.der
+!*.c
+!*.h
+/Debug/
