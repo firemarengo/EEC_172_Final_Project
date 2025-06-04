@@ -1,0 +1,15 @@
+*
+!*/
+
+!.gitignore
+!*.txt
+!*.syscfg
+!*.sal
+!*.pem
+!*.key
+!*.der
+!*.c
+!*.h
+!*.csv
+!*.py
+!*.m
