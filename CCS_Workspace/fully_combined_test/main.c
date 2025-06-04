@@ -134,11 +134,12 @@
 #define HC_SR04_TRIG_PIN     GPIO_PIN_6
 
 // IMU-specific defines
-#define IMU_ADDR       0x6A      // SA0 = 0   0x6A
-#define OUTX_L_G       0x22
-#define OUTX_L_A       0x28
-#define CTRL1_XL       0x10
-#define CTRL2_G        0x11
+#define IMU_ADDR        0x6A    // SA0 = 0 0x6A
+#define OUTX_L_G        0x22
+#define OUTX_L_A        0x28
+#define CTRL1_XL        0x10
+#define CTRL9_XL        0x18
+#define CTRL2_G         0x11
 
 
 
@@ -181,6 +182,7 @@ void TriggerPulse(void);
 void TimerBaseIntHandler(void);
 void TimerRefIntHandler(void);
 void EchoIntHandler(void);
+void IMUinit(void);
 
 static int set_time();
 static void BoardInit(void);
@@ -226,7 +228,7 @@ void TriggerPulse(void)
     // Drive trigger HIGH
     MAP_GPIOPinWrite(HC_SR04_TRIG_BASE, HC_SR04_TRIG_PIN, HC_SR04_TRIG_PIN);
     //
-    // Delay ~10 us: Assuming an 80 MHz clock, each loop of UtilsDelay(~8) is ~1 µs.
+    // Delay ~10 us: Assuming an 80 MHz clock, each loop of UtilsDelay(~8) is ~1 us.
     // You may need to tune this constant based on actual clock speed.
     //
     //GPIO_IF_LedOn(MCU_GREEN_LED_GPIO);
@@ -247,21 +249,21 @@ void TriggerPulse(void)
 void TimerBaseIntHandler(void)
 {
 
-if(startFlag) {
+    if(startFlag) {
+            MAP_TimerIntClear(TIMERA0_BASE, TIMER_TIMA_TIMEOUT);
+            return;
+        }
+
+        // Clear the timer interrupt.
+        //Timer_IF_InterruptClear(g_ulBase);
         MAP_TimerIntClear(TIMERA0_BASE, TIMER_TIMA_TIMEOUT);
-        return;
-    }
-
-    // Clear the timer interrupt.
-    //Timer_IF_InterruptClear(g_ulBase);
-    MAP_TimerIntClear(TIMERA0_BASE, TIMER_TIMA_TIMEOUT);
 
 
-    g_ulTimerInts ++;
-    //GPIO_IF_LedToggle(MCU_GREEN_LED_GPIO);
+        g_ulTimerInts ++;
+        //GPIO_IF_LedToggle(MCU_GREEN_LED_GPIO);
 
-    TriggerPulse();
-    //Report("Pulse %lu \r\n", g_ulTimerInts);
+        TriggerPulse();
+        //Report("Pulse %lu \r\n", g_ulTimerInts);
 }
 
 
@@ -467,27 +469,27 @@ static int http_post_message(int iTLSSockID, char * str, int strLength){
 //Echo pin
 //*********************************
 
-int gx_cal = 0;
-int gz_cal = 0;
-int gy_cal = 0;
-int ax_cal = 0;
-int ay_cal = 0;
-int az_cal = 0;
-int gx_last = 0;
-int gz_last = 0;
-int gy_last = 0;
-int ax_last = 0;
-int ay_last = 0;
-int az_last = 0;
-int first = 1;
+// Calibration offsets (raw LSB units, 16bit int)
+static int16_t gx_cal, gy_cal, gz_cal;
+static int16_t ax_cal, ay_cal, az_cal;
+// Last filtered values (physical units -> float)
+static float gx_last, gy_last, gz_last;
+static float ax_last, ay_last, az_last;
+
+// Buffers and raw readings
+uint8_t  buf[6];
+int16_t  raw_ax, raw_ay, raw_az;
+int16_t  raw_gx, raw_gy, raw_gz;
+
 static volatile unsigned long ulEchoStart = 0;
 static volatile unsigned long ulEchoEnd   = 0;
-int16_t gx, gy, gz;
-int16_t ax, ay, az;
+float vel_x = 0, pos_x = 0;
+float vel_y = 0, pos_y = 0;
+float dt = 0.05;
 
 void EchoIntHandler(void)
 {
-    // 1) Read & clear the interrupt flag
+    // Read & clear the interrupt flag
     if(startFlag) {
         MAP_GPIOIntClear(GPIOA1_BASE, 0x1);
         return;
@@ -522,88 +524,126 @@ void EchoIntHandler(void)
 
             //============================================================================
             //IMPORTANT CALIBRATION VALUE: scalar calibration based on measured vs true values.
-            unsigned long distanceCal = 39/36;
+            float distanceCal = 39.0f / 36.0f; // true/displayed, for an inaccurate reading
             //=============================================================================
 
-            unsigned long ulDistIn = distanceCal * (ulDelta * 675UL) / 100000UL;
+            float ulDistIn = distanceCal * ((float)ulDelta * 0.00675f);
+            //Report("Distance: %u in\r\n", ulDistIn);
 
-            // 5) Now ulDistIn holds the one-way distance in inches.
-            Report("Distance: %u in\r\n", ulDistIn);
+            //Code for IMU will go here:
+            readGyroXYZ(&raw_gx, &raw_gy, &raw_gz);
+            readAccelXYZ(&raw_ax, &raw_ay, &raw_az);
+            //Report("raw delGyro (X,Y,Z) = %d, %d, %d LSB\r\n", raw_gx, raw_gy, raw_gz);
 
-            //Code for IMU will go here.
-            if (first) {
-                // Zero out gyro & accel on first iteration
-                readGyroXYZ(&gx, &gy, &gz);
-                readAccelXYZ(&ax, &ay, &az);
-                gx_cal = gx;
-                gz_cal = gz;
-                gy_cal = gy;
-                ax_cal = ax;
-                ay_cal = ay;
-                az_cal = az;
-                gx_last = gx;
-                gz_last = gx;
-                gy_last = gy;
-                ax_last = ax;
-                ay_last = ay;
-                az_last = az;
-                ////ax = ay = az = 0;
+            // Convert to physical units (subtract offsets, apply sensitivity)
+            float gx_f = ((float)(raw_gx - gx_cal)) * 0.0175f;   // +-125 dps -> 8.75 mdps/LSB
+            float gy_f = ((float)(raw_gy - gy_cal)) * 0.0175f;
+            float gz_f = ((float)(raw_gz - gz_cal)) * 0.0175f;
+//            float gx_f = ((float)(raw_gx - gx_cal)) * 0.00875f;   // +-250 dps -> 8.75 mdps/LSB
+//            float gy_f = ((float)(raw_gy - gy_cal)) * 0.00875f;
+//            float gz_f = ((float)(raw_gz - gz_cal)) * 0.00875f;
 
-                first = 0;
+            float ax_f = ((float)(raw_ax - ax_cal)) * 0.000061f;  // +-2 g -> 0.061 mg/LSB
+            float ay_f = ((float)(raw_ay - ay_cal)) * 0.000061f;
+            float az_f = ((float)(raw_az - az_cal)) * 0.000061f;
 
-                sevenAxisData data;
-                data.dist = ulDistIn;
-                data.gyro_x = gx;
-                data.gyro_y = gy;
-                data.gyro_z = gz;
-                data.acc_x  = ax;
-                data.acc_y  = ay;
-                data.acc_z  = az;
+            sevenAxisData data;
+            data.dist = ulDistIn;
+            data.gyro_x = gx_f;
+            data.gyro_y = gy_f;
+            data.gyro_z = gz_f;
+            data.acc_x  = ax_f;
+            data.acc_y  = ay_f;
+            data.acc_z  = az_f;
 
-                char buffer[BUFF_SIZE];
-                parseData(data, buffer, BUFF_SIZE, true);
+            char buffer[BUFF_SIZE];
+            parseData(data, buffer, BUFF_SIZE, false);
 
-                int msgLength = strlen(buffer);
-                http_post_message(lRetVal_g, buffer, msgLength);
-            }
-            else {
-                // Read actual gyro and accel values thereafter
-                readGyroXYZ(&gx, &gy, &gz);
-                readAccelXYZ(&ax, &ay, &az);
+            int msgLength = strlen(buffer);
+            http_post_message(lRetVal_g, buffer, msgLength);
 
-                sevenAxisData data;
-                data.dist = ulDistIn;
-                data.gyro_x = gx;
-                data.gyro_y = gy;
-                data.gyro_z = gz;
-                data.acc_x  = ax;
-                data.acc_y  = ay;
-                data.acc_z  = az;
+            //  low-pass: y[n] = 0.7*x[n] + 0.3*y[n-1]
+//            gx_f = 0.7f * gx_f + 0.3f * gx_last;
+//            gy_f = 0.7f * gy_f + 0.3f * gy_last;
+//            gz_f = 0.7f * gz_f + 0.3f * gz_last;
+//
+//            ax_f = 0.7f * ax_f + 0.3f * ax_last;
+//            ay_f = 0.7f * ay_f + 0.3f * ay_last;
+//            az_f = 0.7f * az_f + 0.3f * az_last;
 
-                char buffer[BUFF_SIZE];
-                parseData(data, buffer, BUFF_SIZE, false);
+            // Save filtered values for next iteration
+//            gx_last = gx_f;   gy_last = gy_f;   gz_last = gz_f;
+//            ax_last = ax_f;   ay_last = ay_f;   az_last = az_f;
 
-                int msgLength = strlen(buffer);
-                http_post_message(lRetVal_g, buffer, msgLength);
-            }
-
-            gx = 0.7 * (gx - gx_cal) + 0.3 * gx_last;
-            gy = 0.7 * (gy - gy_cal) + 0.3 * gy_last;
-            gz = 0.7 * (gz - gz_cal) + 0.3 * gz_last;
-            ax = 0.7 * (ax - ax_cal) + 0.3 * ax_last;
-            ay = 0.7 * (ay - ay_cal) + 0.3 * ay_last;
-            az = 0.7 * (az - az_cal) + 0.3 * az_last;
-            //y[n] = b * x[n] + a * y[n-1]
+            // Print to UART (in dps and g)
+//            Report("%u,%7.f,%7.f,%7.f,%7.f,%7.f,%7.f\r\n", ulDistIn,
+                   //gx_f, gy_f, gz_f,ax_f, ay_f, az_f);
+            Report("%7.1f,%7.2f,%7.2f,%7.2f,%7.3f,%7.3f,%7.3f\r\n", ulDistIn,
+                   gx_f, gy_f, gz_f,ax_f, ay_f, az_f);
+            // state variables (initialized to zero before you start)
 
 
 
-            // Print to UART (whether zeros or real data)
-            Report("Gyro (X, Y, Z) = %5d, %5d, %5d\r\n", gx, gy, gz);
-            Report("Accel(X, Y, Z) = %5d, %5d, %5d\r\n", ax, ay, az);
-            Report("----------------------------------------\r\n");
+            //pos_y = (int)(pos_y * 100.0f) / 100.0f;
+            //Report("x=%.3f, y=%.3f\r\n", pos_x, pos_y);
 
+//            Report("Gyro (X, Y, Z) = %7.2f, %7.2f, %7.2f dps\r\n",
+//                   gx_f, gy_f, gz_f);
+//            Report("Accel(X, Y, Z) = %7.3f, %7.3f, %7.3f g\r\n",
+//                   ax_f, ay_f, az_f);
+//            Report("----------------------------------------\r\n");
         }
     }
+}
+
+void IMUinit(void) {
+    //unsigned char cfg;
+    uint8_t cfg;
+
+    // Disable I3C (CTRL9_XL = 0x18, bit0 = 1)
+    cfg = 0x01;
+    I2C_IF_Write(IMU_ADDR, (unsigned char[]){ CTRL9_XL, cfg }, 2, 1);
+
+    // Configure accel --> 104 Hz, +/-2 g (CTRL1_XL = 0x10, 0x40)
+    cfg = 0x40;
+    I2C_IF_Write(IMU_ADDR, (unsigned char[]){ CTRL1_XL, cfg }, 2, 1);
+
+    // Configure gyro  --> 104 Hz, +/-250 dps (CTRL2_G  = 0x11, 0x44)
+    cfg = 0x44;
+    I2C_IF_Write(IMU_ADDR, (unsigned char[]){ CTRL2_G,  cfg }, 2, 1);
+
+    // Allow time for settings to take effect
+    MAP_UtilsDelay(4000000);
+
+    // Then, do what we used to do with int first; once at initalization,
+    // effectively zero the IMU. Save computation during running.
+
+    readGyroXYZ(&raw_gx, &raw_gy, &raw_gz);
+    readAccelXYZ(&raw_ax, &raw_ay, &raw_az);
+    gx_cal = raw_gx;
+    gy_cal = raw_gy;
+    gz_cal = raw_gz;
+    ax_cal = raw_ax;
+    ay_cal = raw_ay;
+    az_cal = raw_az;
+
+    sevenAxisData data;
+    data.dist = 0;
+    data.gyro_x = gx_cal;
+    data.gyro_y = gy_cal;
+    data.gyro_z = gz_cal;
+    data.acc_x  = ax_cal;
+    data.acc_y  = ay_cal;
+    data.acc_z  = az_cal;
+
+    char buffer[BUFF_SIZE];
+    parseData(data, buffer, BUFF_SIZE, true);
+
+    int msgLength = strlen(buffer);
+    http_post_message(lRetVal_g, buffer, msgLength);
+//    gx_last = gy_last = gz_last = 0.0f;
+//    ax_last = ay_last = az_last = 0.0f;
+
 }
 
 //*****************************************************************************
@@ -628,7 +668,7 @@ void main() {
     InitTerm();
     ClearTerm();
     I2C_IF_Open(I2C_MASTER_MODE_FST);
-    Report("this works!\r\n");
+    Report("d,gx,gy,gz,ax,ay,az\r\n");
 
     // Enable the SPI module clock
     MAP_PRCMPeripheralClkEnable(PRCM_GSPI,PRCM_RUN_MODE_CLK);
@@ -654,15 +694,9 @@ void main() {
     // Initialize Adafruit OLED
     Adafruit_Init();
     fillScreen(WHITE);
-    MAP_UtilsDelay(4000000);
+    IMUinit();
 
-    unsigned char cfg;
-    int first = 1;  // Flag to zero readings on the first iteration
-
-    cfg = 0x80;
-    I2C_IF_Write(IMU_ADDR, (unsigned char[]){CTRL1_XL, cfg}, 2, 1);
-    cfg = 0x80;
-    I2C_IF_Write(IMU_ADDR, (unsigned char[]){CTRL2_G,  cfg}, 2, 1);
+    // MAP_UtilsDelay(4000000);
 
     //Echo-pin interrupt
     MAP_GPIOIntRegister(GPIOA1_BASE, EchoIntHandler);
@@ -685,7 +719,7 @@ void main() {
     MAP_PRCMPeripheralClkEnable(PRCM_TIMERA0, PRCM_RUN_MODE_CLK);
     Timer_IF_Init(PRCM_TIMERA0, g_ulBase, TIMER_CFG_PERIODIC, TIMER_A, 0);
     Timer_IF_IntSetup(g_ulBase, TIMER_A, TimerBaseIntHandler);
-    Timer_IF_Start(g_ulBase, TIMER_A, 100);
+    Timer_IF_Start(g_ulBase, TIMER_A, dt*1000);
 
     startFlag = 0;
 
