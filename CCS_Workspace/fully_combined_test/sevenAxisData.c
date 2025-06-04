@@ -10,13 +10,13 @@
 #include "sevenAxisData.h"
 
 const char * PARSEFORMAT = "{\r\n" \
-            "\"dist\": %.3f,\r\n"                                           \
-            "\"acc_x\": %.3f,\r\n"                                          \
-            "\"acc_y\": %.3f,\r\n"                                          \
-            "\"acc_z\": %.3f,\r\n"                                          \
-            "\"gyro_x\": %.3f,\r\n"                                         \
-            "\"gyro_y\": %.3f,\r\n"                                         \
-            "\"gyro_z\": %.3f\r\n"                                          \
+            "\"d\": %.3f,\r\n"                                           \
+            "\"ax\": %.3f,\r\n"                                          \
+            "\"ay\": %.3f,\r\n"                                          \
+            "\"az\": %.3f,\r\n"                                          \
+            "\"gx\": %.3f,\r\n"                                         \
+            "\"gy\": %.3f,\r\n"                                         \
+            "\"gz\": %.3f\r\n"                                          \
         "},\r\n"                                                            \
         "\"isReset\": %s\r\n";
 
