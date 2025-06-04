@@ -8,14 +8,14 @@
 #include <stdio.h>
 #include "sevenAxisData.h"
 
-const char * PARSEFORMAT = "{" \
+const char * PARSEFORMAT = "{\r\n" \
             "\"dist\": %.3f,\r\n"                                           \
             "\"acc_x\": %.3f,\r\n"                                          \
             "\"acc_y\": %.3f,\r\n"                                          \
             "\"acc_z\": %.3f,\r\n"                                          \
             "\"gyro_x\": %.3f,\r\n"                                         \
             "\"gyro_y\": %.3f,\r\n"                                         \
-            "\"gyro_z\": %.3f,\r\n"                                         \
+            "\"gyro_z\": %.3f\r\n"                                          \
         "}";
 
 void parseData(sevenAxisData data, char * buff, unsigned int buffLength) {
