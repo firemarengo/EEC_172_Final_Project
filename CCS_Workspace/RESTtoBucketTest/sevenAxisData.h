@@ -9,6 +9,7 @@
 #define SEVENAXISDATA_H_
 
 #include <stdio.h>
+#include <stdbool.h>
 
 typedef struct {
     float dist;
@@ -26,6 +27,6 @@ typedef struct {
 // The char * object will be formatted such that it can
 // be directly placed into the http_post_values function
 // in main.c.
-void parseData(sevenAxisData data, char * buff, unsigned int buffLength);
+void parseData(sevenAxisData data, char * buff, unsigned int buffLength, bool isReset);
 
 #endif /* SEVENAXISDATA_H_ */

@@ -16,9 +16,23 @@ const char * PARSEFORMAT = "{\r\n" \
             "\"gyro_x\": %.3f,\r\n"                                         \
             "\"gyro_y\": %.3f,\r\n"                                         \
             "\"gyro_z\": %.3f\r\n"                                          \
-        "}";
+        "},\r\n"                                                            \
+        "\"isReset\": %s\r\n";
 
-void parseData(sevenAxisData data, char * buff, unsigned int buffLength) {
+void parseData(sevenAxisData data, char * buff, unsigned int buffLength, bool isReset) {
+    char truth[4] = "true";
+    char falsehood[5] = "false";
+    char buf[10];
+
+    if (isReset) {
+        strncpy(buf, truth, 4);
+        buf[4] = '\0';
+    }
+    else {
+        strncpy(buf, falsehood, 5);
+        buf[5] = '\0';
+    }
+
     snprintf(buff, buffLength, PARSEFORMAT, data.dist, data.acc_x,
-             data.acc_y, data.acc_z, data.gyro_x, data.gyro_y, data.gyro_z);
+             data.acc_y, data.acc_z, data.gyro_x, data.gyro_y, data.gyro_z, buf);
 }

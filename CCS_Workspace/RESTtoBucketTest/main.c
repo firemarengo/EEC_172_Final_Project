@@ -244,16 +244,16 @@ void main() {
 
     // Test for implementing values. //
     sevenAxisData data;
-    data.dist = 3.14;
-    data.acc_x = 4.5555;
-    data.acc_y = 19.456;
-    data.acc_z = 987.7894;
+    data.dist = 3.333;
+    data.acc_x = 4.4444;
+    data.acc_y = 15.555;
+    data.acc_z = 912.444;
     data.gyro_x = 24.5;
     data.gyro_y = 55.6;
-    data.gyro_z = 66.3;
+    data.gyro_z = 63.333361;
 
     char buffer[BUFF_SIZE];
-    parseData(data, buffer, BUFF_SIZE);
+    parseData(data, buffer, BUFF_SIZE, false);
 
     int msgLength = strlen(buffer);
     http_post_message(lRetVal, buffer, msgLength);
