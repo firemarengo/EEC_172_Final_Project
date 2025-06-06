@@ -61,6 +61,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
 
 // Simplelink includes
@@ -141,7 +142,11 @@
 #define CTRL9_XL        0x18
 #define CTRL2_G         0x11
 
+#define DATASET_SIZE    100
 
+#define TEXT_COLOR      0x0000
+#define BG_COLOR        0xFFFF
+#define TEXT_SIZE       4
 
 //*****************************************************************************
 //                 GLOBAL VARIABLES -- Start
@@ -166,7 +171,15 @@ static volatile unsigned long g_ulRefTimerInts = 0;
 static volatile unsigned long g_ulIntClearVector;
 unsigned long g_ulTimerInts;
 int startFlag = 1;
-int lRetVal_g = 0;
+long lRetVal_g = -1;
+
+static volatile sevenAxisData dataSet[DATASET_SIZE];
+static volatile unsigned int dataSet_idx = 0;
+
+
+// Cursor position variables for OLED typing.
+unsigned int Cursor_x = (WIDTH / 2) - (4 * TEXT_SIZE);
+unsigned int Cursor_y = (HEIGHT / 2) - (6 * TEXT_SIZE);
 
 //*****************************************************************************
 //                 GLOBAL VARIABLES -- End: df
@@ -547,20 +560,13 @@ void EchoIntHandler(void)
             float ay_f = ((float)(raw_ay - ay_cal)) * 0.000061f;
             float az_f = ((float)(raw_az - az_cal)) * 0.000061f;
 
-            sevenAxisData data;
-            data.dist = ulDistIn;
-            data.gyro_x = gx_f;
-            data.gyro_y = gy_f;
-            data.gyro_z = gz_f;
-            data.acc_x  = ax_f;
-            data.acc_y  = ay_f;
-            data.acc_z  = az_f;
-
+            /*
             char buffer[BUFF_SIZE];
             parseData(data, buffer, BUFF_SIZE, false);
 
             int msgLength = strlen(buffer);
             http_post_message(lRetVal_g, buffer, msgLength);
+            */
 
             //  low-pass: y[n] = 0.7*x[n] + 0.3*y[n-1]
 //            gx_f = 0.7f * gx_f + 0.3f * gx_last;
@@ -578,8 +584,17 @@ void EchoIntHandler(void)
             // Print to UART (in dps and g)
 //            Report("%u,%7.f,%7.f,%7.f,%7.f,%7.f,%7.f\r\n", ulDistIn,
                    //gx_f, gy_f, gz_f,ax_f, ay_f, az_f);
-            Report("%7.1f,%7.2f,%7.2f,%7.2f,%7.3f,%7.3f,%7.3f\r\n", ulDistIn,
-                   gx_f, gy_f, gz_f,ax_f, ay_f, az_f);
+            dataSet[dataSet_idx].dist = ulDistIn;
+            dataSet[dataSet_idx].gyro_x = gx_f;
+            dataSet[dataSet_idx].gyro_y = gy_f;
+            dataSet[dataSet_idx].gyro_z = gz_f;
+            dataSet[dataSet_idx].acc_x  = ax_f;
+            dataSet[dataSet_idx].acc_y  = ay_f;
+            dataSet[dataSet_idx].acc_z  = az_f;
+            dataSet_idx++;
+
+            //Report("%7.1f,%7.2f,%7.2f,%7.2f,%7.3f,%7.3f,%7.3f\r\n", ulDistIn,
+                   //gx_f, gy_f, gz_f,ax_f, ay_f, az_f);
             // state variables (initialized to zero before you start)
 
 
@@ -627,20 +642,16 @@ void IMUinit(void) {
     ay_cal = raw_ay;
     az_cal = raw_az;
 
-    sevenAxisData data;
-    data.dist = 0;
-    data.gyro_x = gx_cal;
-    data.gyro_y = gy_cal;
-    data.gyro_z = gz_cal;
-    data.acc_x  = ax_cal;
-    data.acc_y  = ay_cal;
-    data.acc_z  = az_cal;
+    drawChar(Cursor_x, Cursor_y, 'P', TEXT_COLOR, BG_COLOR, TEXT_SIZE);
 
+    /*
     char buffer[BUFF_SIZE];
     parseData(data, buffer, BUFF_SIZE, true);
 
     int msgLength = strlen(buffer);
     http_post_message(lRetVal_g, buffer, msgLength);
+    */
+
 //    gx_last = gy_last = gz_last = 0.0f;
 //    ax_last = ay_last = az_last = 0.0f;
 
@@ -658,7 +669,7 @@ void IMUinit(void) {
 void main() {
     unsigned long g_ulBase = TIMERA0_BASE;
     unsigned long g_ulEchoTimerBase = TIMERA1_BASE;
-    long lRetVal = -1;
+    bool done = false;
 
     //
     // Initialize board configuration
@@ -690,6 +701,26 @@ void main() {
 
     // Enable SPI for communication
     MAP_SPIEnable(GSPI_BASE);
+
+    // initialize global default app configuration
+    g_app_config.host = SERVER_NAME;
+    g_app_config.port = GOOGLE_DST_PORT;
+
+    //Connect the CC3200 to the local access point
+    lRetVal_g = connectToAccessPoint();
+
+    //Set time so that encryption can be used
+    lRetVal_g = set_time();
+    if(lRetVal_g < 0) {
+        UART_PRINT("Unable to set time in the device");
+        LOOP_FOREVER();
+    }
+
+    //Connect to the website with TLS encryption
+    lRetVal_g = tls_connect();
+    if(lRetVal_g < 0) {
+        ERR_PRINT(lRetVal_g);
+    }
 
     // Initialize Adafruit OLED
     Adafruit_Init();
@@ -723,28 +754,39 @@ void main() {
 
     startFlag = 0;
 
-    // initialize global default app configuration
-    g_app_config.host = SERVER_NAME;
-    g_app_config.port = GOOGLE_DST_PORT;
+    while (!done) {
+        if (dataSet_idx >= DATASET_SIZE) {
+            MAP_IntDisable(INT_GPIOA1);
+            MAP_TimerDisable(g_ulEchoTimerBase, TIMER_A);
+            Timer_IF_Stop(g_ulBase, TIMER_A);
 
-    //Connect the CC3200 to the local access point
-    lRetVal = connectToAccessPoint();
+            drawChar(Cursor_x, Cursor_y, 'S', TEXT_COLOR, BG_COLOR, TEXT_SIZE);
 
-    //Set time so that encryption can be used
-    lRetVal = set_time();
-    if(lRetVal < 0) {
-        UART_PRINT("Unable to set time in the device");
-        LOOP_FOREVER();
+            // Reset .csv on s3.
+            char buffer[BUFF_SIZE];
+            parseData(dataSet[0], buffer, BUFF_SIZE, true);
+
+            int msgLength = strlen(buffer);
+            http_post_message(lRetVal_g, buffer, msgLength);
+            MAP_UtilsDelay(800000);
+
+            unsigned int i = 0, j = 0;
+            for (i = 0; i < DATASET_SIZE; i++) {
+                for (j = 0; j < BUFF_SIZE; j++) { buffer[j] = '\0'; }
+                parseData(dataSet[i], buffer, BUFF_SIZE, false);
+
+                int msgLength = strlen(buffer);
+                http_post_message(lRetVal_g, buffer, msgLength);
+                MAP_UtilsDelay(8000);
+
+                Report("%d post sent.\n\n\r", i+1);
+            }
+            done = true;
+            Report("All data transmitted!\n\n");
+
+            drawChar(Cursor_x, Cursor_y, 'D', TEXT_COLOR, BG_COLOR, TEXT_SIZE);
+        }
     }
-
-    //Connect to the website with TLS encryption
-    lRetVal = tls_connect();
-    if(lRetVal < 0) {
-        ERR_PRINT(lRetVal);
-    }
-
-    sl_Stop(SL_STOP_TIMEOUT);
-    LOOP_FOREVER();
 }
 //*****************************************************************************
 //

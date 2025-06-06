@@ -64,14 +64,16 @@
 #include "simplelink.h"
 
 //Driverlib includes
-#include "hw_types.h"
-#include "hw_ints.h"
 #include "rom.h"
 #include "rom_map.h"
+#include "hw_memmap.h"
+#include "hw_common_reg.h"
+#include "hw_types.h"
+#include "hw_ints.h"
 #include "interrupt.h"
 #include "prcm.h"
 #include "utils.h"
-//#include "uart.h"
+#include "uart.h"
 
 //Common interface includes
 #include "pinmux.h"
@@ -81,7 +83,20 @@
 
 // Custom includes
 #include "utils/network_utils.h"
-#include "sevenAxisData.h"
+
+
+//NEED TO UPDATE THIS FOR IT TO WORK!
+#define DATE                29    /* Current Date */
+#define MONTH               5     /* Month 1-12 */
+#define YEAR                2025  /* Current year */
+#define HOUR                21    /* Time - hours */
+#define MINUTE              13    /* Time - minutes */
+#define SECOND              0     /* Time - seconds */
+
+#define CONSOLE              UARTA0_BASE
+#define UartGetChar()        MAP_UARTCharGet(CONSOLE)
+#define UartPutChar(c)       MAP_UARTCharPut(CONSOLE,c)
+#define MAX_STRING_LENGTH    10000
 
 #define APPLICATION_NAME      "SSL"
 #define APPLICATION_VERSION   "SQ24"
@@ -107,10 +122,10 @@
             "}"                                                             \
         "}\r\n\r\n"
 
-#define BUFF_SIZE       512
 //*****************************************************************************
 //                 GLOBAL VARIABLES -- Start
 //*****************************************************************************
+volatile int g_iCounter = 0;
 
 #if defined(ccs) || defined(gcc)
 extern void (* const g_pfnVectors[])(void);
@@ -129,6 +144,8 @@ extern uVectorEntry __vector_table;
 //****************************************************************************
 static int set_time();
 static void BoardInit(void);
+static int http_post(int);
+static int http_get(int);
 static int http_post_message(int, char *, int);
 
 //*****************************************************************************
@@ -161,9 +178,6 @@ static void BoardInit(void) {
 
     PRCMCC3200MCUInit();
 }
-
-
-
 
 //*****************************************************************************
 //
@@ -211,6 +225,9 @@ static int set_time() {
 //*****************************************************************************
 void main() {
     long lRetVal = -1;
+    char cString[MAX_STRING_LENGTH+1];
+    char cCharacter;
+    int iStringLength = 0;
     //
     // Initialize board configuration
     //
@@ -240,24 +257,39 @@ void main() {
         ERR_PRINT(lRetVal);
     }
 
-    // Test for implementing values. //
-    sevenAxisData data;
-    data.dist = 3.333;
-    data.acc_x = 4.4444;
-    data.acc_y = 15.555;
-    data.acc_z = 912.444;
-    data.gyro_x = 24.5;
-    data.gyro_y = -55.6;
-    data.gyro_z = 63.333361;
+    Message("\n\n\n\r");
+    Message("cmd#");
+    while(1)
+    {
+        //
+        // Fetching the input from the terminal.
+        //
+        cCharacter = UartGetChar();
+        g_iCounter++;
+        if(cCharacter == '\r' || cCharacter == '\n' ||
+           (iStringLength >= MAX_STRING_LENGTH -1))
+        {
+            if(iStringLength >= MAX_STRING_LENGTH - 1)
+            {
+                UartPutChar(cCharacter);
+                cString[iStringLength] = cCharacter;
+                iStringLength++;
+            }
+            cString[iStringLength] = '\0';
+            http_post_message(lRetVal, cString, iStringLength);
 
-    char buffer[BUFF_SIZE];
-    parseData(data, buffer, BUFF_SIZE, false);
-
-    int msgLength = strlen(buffer);
-    http_post_message(lRetVal, buffer, msgLength);
-
-    sl_Stop(SL_STOP_TIMEOUT);
-    LOOP_FOREVER();
+            int i = 0;
+            for (i = 0; i < iStringLength; i++) cString[i] = '\0';
+            iStringLength = 0;
+        }
+        else
+        {
+            UartPutChar(cCharacter);
+            cString[iStringLength] = cCharacter;
+            iStringLength++;
+        }
+        //sl_Stop(SL_STOP_TIMEOUT);
+    }
 }
 //*****************************************************************************
 //
@@ -265,6 +297,180 @@ void main() {
 //! @}
 //
 //*****************************************************************************
+
+//*****************************************************************************
+//
+//! Sends POST request to AWS.  The POST request uses macros defined earlier,
+//! in the following format (message divided into multiple lines for clarity
+//! of reading):
+//!
+//! POSTHEADER
+//! HOSTHEADER
+//! CHEADER
+//! \r\n\r\n
+//! CTHEADER
+//! CLHEADER1 <DATA1 length>
+//! CLHEADER2
+//! DATA1
+//!
+//! \param  iTLSSockID: int. TLS socket ID of access port connection for message.
+//!
+//! \return 0 on success. Negative number on error.
+//!
+//*****************************************************************************
+static int http_post(int iTLSSockID){
+    char acSendBuff[512];
+    char acRecvbuff[1460];
+    char cCLLength[200];
+    char* pcBufHeaders;
+    int lRetVal = 0;
+
+    /* Add the following message into pcBufHeaders as a single string (message
+     * divided into multiple lines for clarity of reading):
+     *
+     * POST /things/Haaris_CC3200/shadow HTTP/1.1\r\n
+     * Host: a1v0g26wa10u93-ats.iot.us-east-2.amazonaws.com\r\n
+     * Connection: Keep-Alive\r\n\r\n\r\n
+     * Content-Type: application/json; charset=utf-8\r\n
+     * Content-Length: <calculated in this http-post()>\r\n\r\n
+     * {
+     *  \"state\": {\r\n
+     *      \"desired\": {\r\n
+     *          \"default\" : \"
+     *              "Hello phone, message from CC3200 via AWS IoT!\r\n"
+     *         }
+     *     }
+     * }\r\n\r\n
+     */
+    pcBufHeaders = acSendBuff;
+    strcpy(pcBufHeaders, POSTHEADER);
+    pcBufHeaders += strlen(POSTHEADER);
+    strcpy(pcBufHeaders, HOSTHEADER);
+    pcBufHeaders += strlen(HOSTHEADER);
+    strcpy(pcBufHeaders, CHEADER);
+    pcBufHeaders += strlen(CHEADER);
+    strcpy(pcBufHeaders, "\r\n\r\n");
+
+    int dataLength = strlen(DATA1);
+
+    strcpy(pcBufHeaders, CTHEADER);
+    pcBufHeaders += strlen(CTHEADER);
+    strcpy(pcBufHeaders, CLHEADER1);
+
+    pcBufHeaders += strlen(CLHEADER1);
+    sprintf(cCLLength, "%d", dataLength);
+
+    strcpy(pcBufHeaders, cCLLength);
+    pcBufHeaders += strlen(cCLLength);
+    strcpy(pcBufHeaders, CLHEADER2);
+    pcBufHeaders += strlen(CLHEADER2);
+
+    strcpy(pcBufHeaders, DATA1);
+    pcBufHeaders += strlen(DATA1);
+
+    int testDataLength = strlen(pcBufHeaders);
+
+    // Print message to be sent to terminal.
+    UART_PRINT(acSendBuff);
+
+
+    //
+    // Send the packet to the server */
+    //
+    lRetVal = sl_Send(iTLSSockID, acSendBuff, strlen(acSendBuff), 0);
+    if(lRetVal < 0) {
+        UART_PRINT("POST failed. Error Number: %i\n\r",lRetVal);
+        sl_Close(iTLSSockID);
+        GPIO_IF_LedOn(MCU_RED_LED_GPIO);
+        return lRetVal;
+    }
+    lRetVal = sl_Recv(iTLSSockID, &acRecvbuff[0], sizeof(acRecvbuff), 0);
+    if(lRetVal < 0) {
+        UART_PRINT("Received failed. Error Number: %i\n\r",lRetVal);
+        //sl_Close(iSSLSockID);
+        GPIO_IF_LedOn(MCU_RED_LED_GPIO);
+           return lRetVal;
+    }
+    else {
+        acRecvbuff[lRetVal+1] = '\0';
+        UART_PRINT(acRecvbuff);
+        UART_PRINT("\n\r\n\r");
+    }
+
+    return 0;
+}
+
+//*****************************************************************************
+//
+//! Sends GET request to AWS.  The GET request uses macros defined earlier,
+//! in the following format (message divided into multiple lines for clarity
+//! of reading):
+//!
+//! GETHEADER
+//! HOSTHEADER
+//! CHEADER
+//! \r\n\r\n
+//!
+//! \param  iTLSSockID: int. TLS socket ID of access port connection for message.
+//!
+//! \return 0 on success. Negative number on error.
+//!
+//*****************************************************************************
+static int http_get(int iTLSSockID) {
+    char acSendBuff[512];
+    char acRecvbuff[1460];
+    char* pcBufHeaders;
+    int lRetVal = 0;
+
+
+    /* Add the following message into pcBufHeaders as a single string (message
+     * divided into multiple lines for clarity of reading):
+     *
+     * GET /things/Haaris_CC3200/shadow HTTP/1.1\r\n
+     * Host: a1v0g26wa10u93-ats.iot.us-east-2.amazonaws.com\r\n
+     * Connection: Keep-Alive\r\n\r\n\r\n
+     */
+    pcBufHeaders = acSendBuff;
+    strcpy(pcBufHeaders, GETHEADER);
+    pcBufHeaders += strlen(GETHEADER);
+    strcpy(pcBufHeaders, HOSTHEADER);
+    pcBufHeaders += strlen(HOSTHEADER);
+    strcpy(pcBufHeaders, CHEADER);
+    pcBufHeaders += strlen(CHEADER);
+    strcpy(pcBufHeaders, "\r\n\r\n");
+
+    int testDataLength = strlen(pcBufHeaders);
+
+
+    // Print message to be sent to terminal.
+    UART_PRINT(acSendBuff);
+
+
+    //
+    // Send the packet to the server */
+    //
+    lRetVal = sl_Send(iTLSSockID, acSendBuff, strlen(acSendBuff), 0);
+    if(lRetVal < 0) {
+        UART_PRINT("GET failed. Error Number: %i\n\r",lRetVal);
+        sl_Close(iTLSSockID);
+        GPIO_IF_LedOn(MCU_RED_LED_GPIO);
+        return lRetVal;
+    }
+    lRetVal = sl_Recv(iTLSSockID, &acRecvbuff[0], sizeof(acRecvbuff), 0);
+    if(lRetVal < 0) {
+        UART_PRINT("Received failed. Error Number: %i\n\r",lRetVal);
+        //sl_Close(iSSLSockID);
+        GPIO_IF_LedOn(MCU_RED_LED_GPIO);
+           return lRetVal;
+    }
+    else {
+        acRecvbuff[lRetVal+1] = '\0';
+        UART_PRINT(acRecvbuff);
+        UART_PRINT("\n\r\n\r");
+    }
+
+    return 0;
+}
 
 //*****************************************************************************
 //
@@ -299,7 +505,7 @@ static int http_post_message(int iTLSSockID, char * str, int strLength){
     char * DATA_PART_1 = "{"            \
             "\"state\": {\r\n"          \
                 "\"desired\": {\r\n"    \
-                    "\"body\" : ";
+                    "\"default\" :\"";
 
     // Second part of DATA portion of POST request.
     char data2Buff[strLength];
@@ -309,9 +515,10 @@ static int http_post_message(int iTLSSockID, char * str, int strLength){
     ptrData2Buff += strLength;
 
     // Third part of DATA portion of POST request.
-    char * DATA_PART_3 =    "}"             \
-                        "}"                 \
-                    "}\r\n\r\n";
+    char * DATA_PART_3 = "\"\r\n"   \
+                    "}"             \
+                "}"                 \
+            "}\r\n\r\n";
 
     int dataLength1 = strlen(DATA_PART_1);
     int dataLength2 = strLength;

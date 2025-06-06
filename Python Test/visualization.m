@@ -5,10 +5,24 @@
 % Integrating Accel_X/Accel_Y to get the sensor’s planar displacement (after converting from g to m/s^2),
 % Offsetting each scan point by that displacement.
 
-csvFile = 'C:\Users\Braedon\Downloads\PLEASE.csv'; % change for your .csv
+csvFile = './downloaded_data.csv'; % change for your .csv
+
+movement = 1;
 
 % Sampling interval (seconds) between successive points (e.g. 0.05 for 20 Hz)
-dt = 0.05;
+fs = 20; 
+dt = 1/fs;
+
+% Load CSV into a table
+T = readtable(csvFile);
+beta = 0.5;                 % Tuning parameter for Madgwick Filter.
+                            % (0.1 - 0.5).
+
+% Filters
+T = T(T.d <= 50, :);                % Outlier Filter.
+T = medianFilter(T, 3);             % Median Filter.
+T = madgwickFilter(T, beta, dt);    % Madgwick Filter.
+T = enhancedKalmanFilter(T, dt);    % Enhanced Kalman Filter.
 
 % Convert gyro from degrees/sec (dps) to rad/sec
 deg2rad = pi/180;
@@ -16,9 +30,6 @@ deg2rad = pi/180;
 % Convert accel from g to m/s²
 g_const = 9.81;
 
-% Load CSV into a table
-T = readtable(csvFile);
-T = T(T.d <= 50, :);
 % Expecting columns:
 %   Distance_in       (inches)
 %   Gyro_X_dps, Gyro_Y_dps, Gyro_Z_dps
@@ -28,7 +39,20 @@ distances_in = T.d;                     % inches
 gyro_raw_dps  = [T.gx, T.gy, T.gz];     % dps
 accel_raw_g   = [T.ax, T.ay, T.az];     % g
 
+% fc = 18;                     % cutoff = 18 Hz
+% Wn = 9);              % normalize by Nyquist
+% 
+% % 2) Design a 4th‐order Butterworth low‐pass filter
+% [b,a] = butter(4, Wn, 'low');
+% 
+% % 3) Apply zero‐phase filtering to each column
+% accel_filt = zeros(size(accel_raw_g));
+% for k = 1:3
+%     accel_filt(:,k) = filtfilt(b, a, accel_raw_g(:,k));
+% end
+% accel_raw_g = accel_filt;
 N = height(T);
+
 yaw_rad   = zeros(N,1);    % yaw angle (rad)
 x_scan    = zeros(N,1);    % scan point in sensor frame (m)
 y_scan    = zeros(N,1);
@@ -57,8 +81,8 @@ end
 
 % Integrate accelerometer to obtain sensor’s displacement in the world frame
 for i = 1:N
-    % 1) Threshold raw accel in g: any |ax|<0.01 or |ay|<0.01 -> set to zero
-    ax_g = accel_raw_g(i,1)
+    % Threshold raw accel in g: any |ax|<0.01 or |ay|<0.01 -> set to zero
+    ax_g = accel_raw_g(i,1);
     ay_g = accel_raw_g(i,2);
     az_g = accel_raw_g(i,3);
 
@@ -68,7 +92,8 @@ for i = 1:N
     if abs(ay_g) < 0.03
         ay_g = 0;
     end
-    a_sens = [ax_g, ay_g, az_g] * g_const  % [ax, ay, az] in m/s2
+
+    a_sens = [ax_g, ay_g, az_g] * g_const;  % [ax, ay, az] in m/s2
 
     % Rotate accel from sensor frame to world frame in XY plane
     Rz = [ cos(yaw_rad(i)), -sin(yaw_rad(i)), 0;
@@ -85,17 +110,32 @@ for i = 1:N
     end
 end
 
-
-X_world = y_scan + pos(:,1);
-Y_world = x_scan + pos(:,2);
-close all;
+if(movement)
+    X_world = y_scan + pos(:,1);
+    Y_world = x_scan + pos(:,2);
+else
+    X_world = y_scan; % + pos(:,1);
+    Y_world = x_scan; % + pos(:,2);
+end
+% close all;
 figure;
 plot(-X_world, Y_world, '.-');
 xlabel('X (m)');
 ylabel('Y (m)');
 axis equal;
 title('D + IMU Reconstructed Scan');
-hold on;
-plot(-pos(:,1), pos(:,2), 'r-', 'LineWidth', 2);
-legend('Scan points','Device path','Location','Best');
-hold off;
+if(movement)
+    hold on;
+    plot(-pos(:,1), pos(:,2), 'r-', 'LineWidth', 2);
+    %legend('Scan points','Device path','Location','Best');
+    % Connect each scan point to its device location
+    for i = 1:N
+        devX = -pos(i,1);
+        devY =  pos(i,2);
+        scanX = -X_world(i);
+        scanY =  Y_world(i);
+        plot([devX, scanX], [devY, scanY], 'g-');
+    end
+end
+% 
+% hold off;
